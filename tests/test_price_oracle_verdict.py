@@ -72,6 +72,8 @@ def test_consensus_reached_happy_path(direct_vm, direct_deploy, direct_alice):
     result = json.loads(contract.get_price_result(dispute_id))
     assert result["verdict"] == "CONSENSUS_REACHED"
     assert result["consensus_price"] == "98423.33"
+    assert result["price_low"] == "98300"
+    assert result["price_high"] == "98520"
     assert result["confidence"] == 92
     assert result["sources_used"] == 3
 
@@ -101,6 +103,9 @@ def test_high_variance_verdict(direct_vm, direct_deploy, direct_alice):
 
     result = json.loads(contract.get_price_result(dispute_id))
     assert result["verdict"] == "HIGH_VARIANCE"
+    assert result["price_low"] == "70000"
+    assert result["price_high"] == "120400"
+    assert result["sources_used"] == 3
     dispute = json.loads(contract.get_dispute(dispute_id))
     assert dispute["status"] == "RESOLVED"
 

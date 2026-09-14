@@ -74,6 +74,53 @@ def _enforce_price_range(price_low: str, consensus_price: str, price_high: str):
     return price_low, consensus_price, price_high
 
 
+def _range_ok(price_low, consensus_price, price_high) -> bool:
+    lo = _price_scaled(price_low)
+    mid = _price_scaled(consensus_price)
+    hi = _price_scaled(price_high)
+    return lo <= mid <= hi
+
+
+def _prices_agree(leader_val, other_val) -> bool:
+    sa = _price_scaled(leader_val)
+    sb = _price_scaled(other_val)
+    if sa == 0 or sb == 0:
+        return sa == sb
+    diff = sa - sb
+    if diff < 0:
+        diff = -diff
+    return diff * 50 <= sa
+
+
+def _attestation_self_consistent(payload) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    verdict = payload.get("verdict")
+    if verdict not in ["CONSENSUS_REACHED", "HIGH_VARIANCE", "INSUFFICIENT_DATA"]:
+        return False
+    try:
+        conf = int(payload.get("confidence", -1))
+        src = int(payload.get("sources_used", -1))
+    except Exception:
+        return False
+    if not (0 <= conf <= 100) or src < 0:
+        return False
+    low = payload.get("price_low", "0")
+    mid = payload.get("consensus_price", "0")
+    high = payload.get("price_high", "0")
+    if not _range_ok(low, mid, high):
+        return False
+    if verdict == "INSUFFICIENT_DATA":
+        if _price_scaled(low) != 0 or _price_scaled(mid) != 0 or _price_scaled(high) != 0:
+            return False
+    else:
+        if src < 2:
+            return False
+        if _price_scaled(mid) <= 0:
+            return False
+    return True
+
+
 @allow_storage
 @dataclass
 class PriceDispute:
@@ -301,20 +348,7 @@ Return ONLY raw JSON, no markdown, no backticks:
             if not isinstance(leader_res, gl.vm.Return):
                 return False
             lp = leader_res.calldata
-            if not isinstance(lp, dict):
-                return False
-
-            leader_verdict = lp.get("verdict")
-            leader_conf = lp.get("confidence")
-            leader_price = lp.get("consensus_price", "0")
-
-            if leader_verdict not in ["CONSENSUS_REACHED", "HIGH_VARIANCE", "INSUFFICIENT_DATA"]:
-                return False
-            try:
-                lc = int(leader_conf)
-                if not (0 <= lc <= 100):
-                    return False
-            except Exception:
+            if not _attestation_self_consistent(lp):
                 return False
 
             try:
@@ -322,26 +356,23 @@ Return ONLY raw JSON, no markdown, no backticks:
             except Exception:
                 return False
 
-            if my_result.get("verdict") != leader_verdict:
+            if not _attestation_self_consistent(my_result):
+                return False
+
+            if my_result.get("verdict") != lp.get("verdict"):
                 return False
 
             try:
-                lp_scaled = _price_scaled(leader_price)
-                my_scaled = _price_scaled(my_result.get("consensus_price", "0"))
-                if lp_scaled > 0:
-                    diff = my_scaled - lp_scaled
-                    if diff < 0:
-                        diff = -diff
-                    if diff * 50 > lp_scaled:
-                        return False
-            except Exception:
-                return False
-
-            try:
-                mc = int(my_result.get("confidence", 0))
-                if not (0 <= mc <= 100):
+                if int(my_result.get("sources_used", -1)) != int(lp.get("sources_used", -2)):
                     return False
             except Exception:
+                return False
+
+            if not _prices_agree(lp.get("consensus_price", "0"), my_result.get("consensus_price", "0")):
+                return False
+            if not _prices_agree(lp.get("price_low", "0"), my_result.get("price_low", "0")):
+                return False
+            if not _prices_agree(lp.get("price_high", "0"), my_result.get("price_high", "0")):
                 return False
 
             def _band(c):
@@ -352,6 +383,11 @@ Return ONLY raw JSON, no markdown, no backticks:
                 else:
                     return 3
 
+            try:
+                lc = int(lp.get("confidence", -1))
+                mc = int(my_result.get("confidence", -1))
+            except Exception:
+                return False
             return _band(mc) == _band(lc)
 
         ruling = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)

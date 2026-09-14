@@ -31,7 +31,7 @@ submit_dispute  ->  PENDING
 ```
 
 1. **Submit** -- `submit_dispute(asset_pair, disputed_timestamp, context_note, source_urls)` stores a `PENDING` dispute and returns a `dispute_id` (`"1"`, `"2"`, ...).
-2. **Resolve** -- anyone may call `resolve_dispute(dispute_id)`. Validators fetch each URL, prompt the LLM, and agree on the *meaning* of the result: same verdict, same settlement price band, same confidence band.
+2. **Resolve** -- anyone may call `resolve_dispute(dispute_id)`. Validators fetch each URL, prompt the LLM, and agree on the *meaning* of the full attestation: verdict, consensus price, low/high band, supporting-source count, and confidence band.
 3. **Read** -- `get_price_result(dispute_id)` returns the settlement fields. `get_dispute` returns the full record. `list_disputes` filters by status.
 
 Owner-only `invalidate_dispute` marks spam or clearly invalid `PENDING` submissions as `INCONCLUSIVE`.
@@ -40,11 +40,13 @@ Owner-only `invalidate_dispute` marks spam or clearly invalid `PENDING` submissi
 
 ## Consensus design (meaning, not format)
 
-`resolve_dispute` runs inside `gl.vm.run_nondet_unsafe(leader_fn, validator_fn)`. The validator is not a JSON-shape check. Each validator independently re-fetches the source URLs and re-runs the LLM, then compares its own decision to the leader's.
+`resolve_dispute` runs inside `gl.vm.run_nondet_unsafe(leader_fn, validator_fn)`. The validator is not a JSON-shape check. Each validator independently re-fetches the source URLs and re-runs the LLM, then binds **every core attestation field** against the leader under explicit invariants. Two nodes that reach different decisions cannot both accept the block.
 
-1. **Verdict identity (exact).** Leader and validator must independently produce the same verdict (`CONSENSUS_REACHED`, `HIGH_VARIANCE`, or `INSUFFICIENT_DATA`). Two nodes that reach different decisions cannot both accept the block.
-2. **Settlement price (2% tolerance).** Numeric `consensus_price` values must agree within 2%. Minor LLM rounding is allowed; a materially different number is rejected. This is a semantic price-band check, not a string-equality check.
-3. **Confidence banding.** Scores are grouped into three bands (0-34, 35-79, 80-100). Nodes must land in the same band. Exact integer equality is too brittle for LLM subjectivity. Reasoning text is intentionally not compared.
+1. **Self-consistency (both sides).** Leader payload and validator payload must each be internally valid before they are compared: allowed verdict, confidence in `0..100`, `price_low <= consensus_price <= price_high`, `INSUFFICIENT_DATA` prices all `"0"`, and non-insufficient verdicts require `sources_used >= 2` with a positive midpoint.
+2. **Verdict identity (exact).** `CONSENSUS_REACHED` / `HIGH_VARIANCE` / `INSUFFICIENT_DATA` must match. A different decision is a different attestation.
+3. **Supporting-source count (exact).** `sources_used` is recomputed independently and must match. A 2-source vs 3-source report cannot pass.
+4. **Full price band (2% per field).** `consensus_price`, `price_low`, and `price_high` are each compared within 2% (or exact `0` if either side is zero). Matching only the midpoint while the low/high range diverges is rejected.
+5. **Confidence banding.** Scores are grouped into three bands (0-34, 35-79, 80-100). Nodes must land in the same band. Reasoning text is intentionally not compared.
 
 `validator_fn` first checks `isinstance(leader_res, gl.vm.Return)` and reads `leader_res.calldata`. Each URL fetch is wrapped in its own try/except. `leader_fn` never throws; parse failures fall back to `INSUFFICIENT_DATA` and `"0"` prices. `price_low <= consensus_price <= price_high` is enforced before the result is stored.
 
