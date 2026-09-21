@@ -100,15 +100,18 @@ Owner-only `invalidate_dispute` marks spam or clearly invalid `PENDING` submissi
 
 ## Deployment
 
-- **CONTRACT_ADDRESS**: `0xe875eDbdF72d531FD58f2D680553263d7e015d79`
+- **CONTRACT_ADDRESS**: `0x31182AabBa3b9B338a972Fd231165376ba2A7180`
 - **NETWORK**: `studionet`
+- **Explorer**: https://genlayer-explorer.vercel.app/address/0x31182AabBa3b9B338a972Fd231165376ba2A7180
+- **Revision**: validator binds every core attestation field (`verdict`, `consensus_price`, `price_low`, `price_high`, `sources_used`, confidence band). Previous studionet address `0xe875eDbdF72d531FD58f2D680553263d7e015d79` is superseded by this deploy.
 
-### Live read (real result, 2026-09-13)
+### Live read (real result, 2026-09-21)
 
-A read-only call against the deployed contract on studionet returned:
+A read-only call against the redeployed contract on studionet returned:
 
 - `get_count()` -> `0`
 - `list_disputes("")` -> `[]`
+- schema methods: `submit_dispute`, `resolve_dispute`, `invalidate_dispute`, `get_dispute`, `get_price_result`, `list_disputes`, `get_count`
 
 No disputes have been submitted on this deployment yet, so there is no on-chain `resolve_dispute` receipt to quote. The call sequence below is an **illustrative expected example** taken from the passing unit tests (same public API the live schema exposes).
 
